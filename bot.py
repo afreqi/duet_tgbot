@@ -4,7 +4,6 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.exceptions import TelegramNetworkError
 from datetime import datetime
 
 # === Конфигурация ===
@@ -13,23 +12,24 @@ TARGET_CHAT_ID = -1003025877026
 MENTION_USER_IDS = [7492286439, 7604321833]
 TOTAL_FLATS = 264
 TOTAL_FLOORS = 24
-FLATS_PER_PAGE = 20
 
-# === Логи ===
+# === Настройка логов ===
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище данных пользователей
 user_data = {}
 
 # === /start ===
 @dp.message(Command("start"))
 async def start(message: Message):
-    user_data[message.from_user.id] = {}
+    uid = message.from_user.id
     today_str = datetime.today().strftime("%d.%m.%Y")
-    user_data[message.from_user.id]["date"] = today_str
-    await message.answer(f"🗓 Дата: {today_str}\n\n🚪 Выбери подъезд:")
+    user_data[uid] = {"date": today_str}
+
+    await message.answer(
+        f"🗓 Дата: {today_str}\n\n🚪 Выбери подъезд:"
+    )
     await select_podyezd(message)
 
 # === Подъезд ===
@@ -42,15 +42,20 @@ async def select_podyezd(message: Message):
 
 @dp.callback_query(F.data.startswith("podyezd:"))
 async def podyezd_selected(callback: CallbackQuery):
-    _, podyezd = callback.data.split(":")
     uid = callback.from_user.id
+    _, podyezd = callback.data.split(":")
+
+    if uid not in user_data:
+        today_str = datetime.today().strftime("%d.%m.%Y")
+        user_data[uid] = {"date": today_str}
+
     user_data[uid]["podyezd"] = podyezd
 
     if podyezd in ["1", "2"]:
         await callback.message.edit_text(f"✅ Подъезд: {podyezd}\nТеперь выбери этаж:")
         await select_floor(callback.message)
     else:
-        await callback.message.edit_text(f"✅ Подъезд: {podyezd}")
+        await callback.message.edit_text(f"✅ Подъезд: {podyezd}\nТеперь выбери квартиру.")
         await select_flat(callback.message, page=1)
 
 # === Этаж ===
@@ -66,10 +71,12 @@ async def floor_selected(callback: CallbackQuery):
     _, floor = callback.data.split(":")
     uid = callback.from_user.id
     user_data[uid]["floor"] = floor
-    await callback.message.edit_text(f"✅ Этаж: {floor}")
+    await callback.message.edit_text(f"✅ Этаж: {floor}\nТеперь выбери квартиру.")
     await select_flat(callback.message, page=1)
 
-# === Квартиры (с пагинацией) ===
+# === Квартиры (выпадающий список) ===
+FLATS_PER_PAGE = 20
+
 async def select_flat(message: Message, page: int):
     builder = InlineKeyboardBuilder()
     start = (page - 1) * FLATS_PER_PAGE + 1
@@ -84,7 +91,10 @@ async def select_flat(message: Message, page: int):
         builder.button(text="Вперёд ➡️", callback_data=f"flat_page:{page+1}")
 
     builder.adjust(5)
-    await message.answer(f"🏠 Выбери квартиру ({start}-{end} из {TOTAL_FLATS}):", reply_markup=builder.as_markup())
+    await message.answer(
+        f"🏠 Выбери квартиру ({start}-{end} из {TOTAL_FLATS}):",
+        reply_markup=builder.as_markup()
+    )
 
 @dp.callback_query(F.data.startswith("flat_page:"))
 async def flats_page(callback: CallbackQuery):
@@ -97,35 +107,32 @@ async def flat_selected(callback: CallbackQuery):
     _, flat = callback.data.split(":")
     uid = callback.from_user.id
     user_data[uid]["flat"] = flat
-    await callback.message.edit_text(f"✅ Квартира: {flat}\n🛠 Какие работы необходимо провести?")
-    user_data[uid]["awaiting_comment"] = True
+    await callback.message.edit_text(
+        f"✅ Квартира: {flat}\n\n✏️ Какие работы необходимо провести? (напиши сообщением)"
+    )
 
 # === Комментарий и отправка ===
 @dp.message(F.text)
 async def comment_handler(message: Message):
     uid = message.from_user.id
-
-    if uid not in user_data or not user_data[uid].get("awaiting_comment"):
+    if uid not in user_data or "flat" not in user_data[uid]:
         return
 
     user_data[uid]["comment"] = message.text
-    user_data[uid]["awaiting_comment"] = False
     data = user_data[uid]
-
     formatted_date = data["date"]
-    mentions = ", ".join([f'<a href="tg://user?id={uid}">Получатель</a>' for uid in MENTION_USER_IDS])
+
+    # Упоминания получателей
+    mentions = " ".join(
+        [f'<a href="tg://user?id={uid}">Получатель</a>' for uid in MENTION_USER_IDS]
+    )
 
     text = (
         f"📩 <b>Новая заявка!</b>\n\n"
         f"🗓 Дата: {formatted_date}\n"
         f"🚪 Подъезд: {data.get('podyezd', '-')}\n"
-    )
-
-    if "floor" in data:
-        text += f"🏢 Этаж: {data['floor']}\n"
-
-    text += (
-        f"🏠 Квартира: {data.get('flat', '-')}\n"
+        + (f"🏢 Этаж: {data.get('floor', '-')}\n" if 'floor' in data else '')
+        + f"🏠 Квартира: {data['flat']}\n"
         f"💬 Комментарий: {data['comment']}\n\n"
         f"👤 Получатели: {mentions}"
     )
@@ -136,24 +143,14 @@ async def comment_handler(message: Message):
     builder.button(text="📝 Подать новую заявку", callback_data="new_request")
     await message.answer("✅ Заявка отправлена в группу!", reply_markup=builder.as_markup())
 
-# === Новая заявка ===
 @dp.callback_query(F.data == "new_request")
 async def new_request(callback: CallbackQuery):
     await callback.message.edit_text("🚀 Начинаем новую заявку!")
     await start(callback.message)
 
-# === Запуск с авто-перезапуском ===
-async def run_bot():
-    while True:
-        try:
-            logging.info("🚀 Бот запущен и готов к работе...")
-            await dp.start_polling(bot)
-        except TelegramNetworkError as e:
-            logging.error(f"⚠️ Ошибка сети: {e}. Перезапуск через 5 секунд...")
-            await asyncio.sleep(5)
-        except Exception as e:
-            logging.error(f"💥 Неожиданная ошибка: {e}. Перезапуск через 10 секунд...")
-            await asyncio.sleep(10)
+# === Запуск ===
+async def main():
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    asyncio.run(main())
