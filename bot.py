@@ -47,7 +47,7 @@ async def select_podyezd(message: Message):
     for p in ["1", "2", "Дворовая территория"]:
         builder.button(text=p, callback_data=f"podyezd:{p}")
     builder.adjust(1)
-    await message.answer("🚪 Выбери подъезд:", reply_markup=builder.as_markup())
+    await message.answer("🚪 Выберите подъезд:", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("podyezd:"))
 async def podyezd_selected(callback: CallbackQuery):
@@ -57,7 +57,7 @@ async def podyezd_selected(callback: CallbackQuery):
     user_data[uid]["podyezd"] = podyezd
 
     if podyezd in ["1", "2"]:
-        await callback.message.answer(f"✅ Подъезд: {podyezd}\nТеперь выбери этаж:")
+        await callback.message.answer(f"✅ Подъезд: {podyezd}\nТеперь выберите этаж:")
         await select_floor(callback.message)
     else:
         # Дворовая территория → пропуск этажей и квартир
@@ -71,7 +71,7 @@ async def select_floor(message: Message):
     for i in range(1, TOTAL_FLOORS + 1):
         builder.button(text=str(i), callback_data=f"floor:{i}")
     builder.adjust(4)
-    await message.answer("🏢 Выбери этаж:", reply_markup=builder.as_markup())
+    await message.answer("🏢 Выберите этаж:", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("floor:"))
 async def floor_selected(callback: CallbackQuery):
@@ -82,7 +82,7 @@ async def floor_selected(callback: CallbackQuery):
 
     # Подъезд 1 или 2 → запрос номера квартиры
     user_data[uid]["expect_flat"] = True
-    await callback.message.answer("✏️ Укажи номер квартиры (цифры только, диапазон зависит от подъезда)")
+    await callback.message.answer("✏️ Укажите номер квартиры")
 
 # === Ввод квартиры и комментария ===
 @dp.message()
@@ -96,17 +96,17 @@ async def handle_flat_or_comment(message: Message):
     # --- Ввод квартиры ---
     if data.get("expect_flat"):
         if not message.text.isdigit():
-            await message.reply("❌ Вводить можно только цифры от 1 до 264. Попробуй снова.")
+            await message.reply("❌ Вводить можно только цифры от 1 до 264. Попробуйте снова.")
             return
         flat = int(message.text)
         podyezd = data["podyezd"]
         if (podyezd == "1" and not (1 <= flat <= 132)) or (podyezd == "2" and not (133 <= flat <= 264)):
-            await message.reply(f"❌ Неверный номер квартиры для подъезда {podyezd}. Попробуй снова.")
+            await message.reply(f"❌ Неверный номер квартиры для подъезда {podyezd}. Попробуйте снова.")
             return
         data["flat"] = flat
         data["expect_flat"] = False
         data["expect_comment"] = True
-        await message.reply("✅ Квартира сохранена.\n✏️ Какие работы необходимо провести? (можно писать любые символы)")
+        await message.reply("✅ Квартира сохранена.\n✏️ Какие работы необходимо провести?")
         return
 
     # --- Ввод комментария ---
