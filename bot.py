@@ -28,7 +28,6 @@ async def start(message: Message):
     today_str = datetime.today().strftime("%d.%m.%Y")
     user_data[uid] = {"date": today_str}
 
-    # 🔹 Новое: Кнопка для запуска бота без /start
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🚀 Запустить бота")]],
         resize_keyboard=True,
@@ -40,7 +39,7 @@ async def start(message: Message):
         reply_markup=keyboard
     )
 
-# 🔹 Новое: обработка кнопки запуска
+# 🔹 Кнопка запуска
 @dp.message(F.text == "🚀 Запустить бота")
 async def launch_bot(message: Message):
     await select_podyezd(message)
@@ -64,12 +63,11 @@ async def podyezd_selected(callback: CallbackQuery):
     user_data[uid]["podyezd"] = podyezd
 
     if podyezd in ["1", "2"]:
-        # Для 1 и 2 подъезда сначала этаж, затем квартиры
-        await callback.message.edit_text(f"✅ Подъезд: {podyezd}\nТеперь выбери этаж:")
+        await callback.message.answer(f"✅ Подъезд: {podyezd}\nТеперь выбери этаж:")
         await select_floor(callback.message)
     else:
-        # Дворовая территория → пропуск этажей и квартир, сразу комментарий
-        await callback.message.edit_text(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести? (напиши сообщением)")
+        # Дворовая территория → пропуск этажей и квартир
+        await callback.message.answer(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести? (напиши сообщением)")
 
 # === Этаж ===
 async def select_floor(message: Message):
@@ -86,12 +84,11 @@ async def select_floor(message: Message):
 @dp.callback_query(F.data.startswith("floor:"))
 async def floor_selected(callback: CallbackQuery):
     uid = callback.from_user.id
+    _, floor = callback.data.split(":")
     if uid not in user_data:
         user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
-
-    _, floor = callback.data.split(":")
     user_data[uid]["floor"] = floor
-    await callback.message.edit_text(f"✅ Этаж: {floor}\nТеперь выбери квартиру.")
+    await callback.message.answer(f"✅ Этаж: {floor}\nТеперь выбери квартиру.")
     await select_flat(callback.message, page=1)
 
 # === Квартиры с учетом подъезда ===
@@ -100,17 +97,14 @@ async def select_flat(message: Message, page: int):
     if uid not in user_data:
         user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
 
-    builder = InlineKeyboardBuilder()
     podyezd = user_data[uid].get("podyezd")
+    if not podyezd or podyezd == "Дворовая территория":
+        return  # не показываем клавиатуру для дворовой территории
 
-    # Диапазон квартир строго по подъезду
-    if podyezd == "1":
-        start_flat, end_flat = 1, 132
-    elif podyezd == "2":
-        start_flat, end_flat = 133, 264
-    else:
-        return  # Дворовая территория → пропуск выбора квартиры
+    # Диапазон квартир по подъезду
+    start_flat, end_flat = (1, 132) if podyezd == "1" else (133, 264)
 
+    builder = InlineKeyboardBuilder()
     start = start_flat + (page - 1) * FLATS_PER_PAGE
     end = min(start + FLATS_PER_PAGE - 1, end_flat)
 
@@ -123,17 +117,11 @@ async def select_flat(message: Message, page: int):
         builder.button(text="Вперёд ➡️", callback_data=f"flat_page:{page+1}")
 
     builder.adjust(5)
-    await message.answer(
-        f"🏠 Выбери квартиру ({start}-{end} из {end_flat}):",
-        reply_markup=builder.as_markup()
-    )
+    await message.answer(f"🏠 Выбери квартиру ({start}-{end} из {end_flat}):", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("flat_page:"))
 async def flats_page(callback: CallbackQuery):
     uid = callback.from_user.id
-    if uid not in user_data:
-        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
-
     _, page = callback.data.split(":")
     await callback.message.delete()
     await select_flat(callback.message, int(page))
@@ -141,24 +129,21 @@ async def flats_page(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("flat:"))
 async def flat_selected(callback: CallbackQuery):
     uid = callback.from_user.id
-    if uid not in user_data:
-        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
-
     _, flat = callback.data.split(":")
     user_data[uid]["flat"] = flat
-    await callback.message.edit_text(
-        f"✅ Квартира: {flat}\n\n✏️ Какие работы необходимо провести? (напиши сообщением)"
-    )
+    await callback.message.answer(f"✅ Квартира: {flat}\n\n✏️ Какие работы необходимо провести? (напиши сообщением)")
 
 # === Комментарий и отправка ===
 @dp.message(F.text)
 async def comment_handler(message: Message):
     uid = message.from_user.id
-    if uid not in user_data or ("flat" not in user_data[uid] and user_data[uid]["podyezd"] in ["1", "2"]):
+    if uid not in user_data:
         return
-
-    user_data[uid]["comment"] = message.text
     data = user_data[uid]
+    if "flat" not in data and data.get("podyezd") in ["1", "2"]:
+        return  # квартира обязателен для подъездов 1 и 2
+
+    data["comment"] = message.text
     formatted_date = data["date"]
 
     mentions = " ".join(
@@ -169,8 +154,8 @@ async def comment_handler(message: Message):
         f"📩 <b>Новая заявка!</b>\n\n"
         f"🗓 Дата: {formatted_date}\n"
         f"🚪 Подъезд: {data.get('podyezd', '-')}\n"
-        + (f"🏢 Этаж: {data.get('floor', '-')}\n" if 'floor' in data else '')
-        + (f"🏠 Квартира: {data.get('flat', '-')}\n" if 'flat' in data else '')
+        + (f"🏢 Этаж: {data.get('floor', '-')}\n" if "floor" in data else "")
+        + (f"🏠 Квартира: {data.get('flat', '-')}\n" if "flat" in data else "")
         + f"💬 Комментарий: {data['comment']}\n\n"
         f"👤 Получатели: {mentions}"
     )
@@ -183,7 +168,7 @@ async def comment_handler(message: Message):
 
 @dp.callback_query(F.data == "new_request")
 async def new_request(callback: CallbackQuery):
-    await callback.message.edit_text("🚀 Начинаем новую заявку!")
+    await callback.message.answer("🚀 Начинаем новую заявку!")
     await start(callback.message)
 
 # === Запуск ===
