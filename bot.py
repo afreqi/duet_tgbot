@@ -12,8 +12,9 @@ TARGET_CHAT_ID = -1003025877026
 MENTION_USER_IDS = [7492286439, 7604321833]
 TOTAL_FLATS = 264
 TOTAL_FLOORS = 24
+FLATS_PER_PAGE = 20
 
-# === Настройка логов ===
+# === Логи ===
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -74,25 +75,33 @@ async def floor_selected(callback: CallbackQuery):
     await callback.message.edit_text(f"✅ Этаж: {floor}\nТеперь выбери квартиру.")
     await select_flat(callback.message, page=1)
 
-# === Квартиры (выпадающий список) ===
-FLATS_PER_PAGE = 20
-
+# === Квартиры с учетом подъезда ===
 async def select_flat(message: Message, page: int):
+    uid = message.from_user.id
     builder = InlineKeyboardBuilder()
-    start = (page - 1) * FLATS_PER_PAGE + 1
-    end = min(start + FLATS_PER_PAGE - 1, TOTAL_FLATS)
+
+    podyezd = user_data[uid].get("podyezd")
+    if podyezd == "1":
+        start_flat, end_flat = 1, 132
+    elif podyezd == "2":
+        start_flat, end_flat = 133, 264
+    else:  # Дворовая территория
+        start_flat, end_flat = 1, 264
+
+    start = start_flat + (page - 1) * FLATS_PER_PAGE
+    end = min(start + FLATS_PER_PAGE - 1, end_flat)
 
     for i in range(start, end + 1):
         builder.button(text=str(i), callback_data=f"flat:{i}")
 
     if page > 1:
         builder.button(text="⬅️ Назад", callback_data=f"flat_page:{page-1}")
-    if end < TOTAL_FLATS:
+    if end < end_flat:
         builder.button(text="Вперёд ➡️", callback_data=f"flat_page:{page+1}")
 
     builder.adjust(5)
     await message.answer(
-        f"🏠 Выбери квартиру ({start}-{end} из {TOTAL_FLATS}):",
+        f"🏠 Выбери квартиру ({start}-{end} из {end_flat}):",
         reply_markup=builder.as_markup()
     )
 
@@ -122,7 +131,6 @@ async def comment_handler(message: Message):
     data = user_data[uid]
     formatted_date = data["date"]
 
-    # Упоминания получателей
     mentions = " ".join(
         [f'<a href="tg://user?id={uid}">Получатель</a>' for uid in MENTION_USER_IDS]
     )
@@ -154,3 +162,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
