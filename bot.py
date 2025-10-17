@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramNetworkError
 from datetime import datetime
 
 # === Конфигурация ===
@@ -97,7 +98,6 @@ async def flat_selected(callback: CallbackQuery):
     uid = callback.from_user.id
     user_data[uid]["flat"] = flat
     await callback.message.edit_text(f"✅ Квартира: {flat}\n🛠 Какие работы необходимо провести?")
-    # Сохраняем состояние, что бот ждёт комментарий
     user_data[uid]["awaiting_comment"] = True
 
 # === Комментарий и отправка ===
@@ -105,12 +105,11 @@ async def flat_selected(callback: CallbackQuery):
 async def comment_handler(message: Message):
     uid = message.from_user.id
 
-    # Проверяем, ожидается ли комментарий
     if uid not in user_data or not user_data[uid].get("awaiting_comment"):
         return
 
     user_data[uid]["comment"] = message.text
-    user_data[uid]["awaiting_comment"] = False  # сбрасываем состояние
+    user_data[uid]["awaiting_comment"] = False
     data = user_data[uid]
 
     formatted_date = data["date"]
@@ -131,10 +130,8 @@ async def comment_handler(message: Message):
         f"👤 Получатели: {mentions}"
     )
 
-    # Отправляем заявку в группу
     await bot.send_message(chat_id=TARGET_CHAT_ID, text=text, parse_mode="HTML")
 
-    # Подтверждение пользователю
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Подать новую заявку", callback_data="new_request")
     await message.answer("✅ Заявка отправлена в группу!", reply_markup=builder.as_markup())
@@ -145,9 +142,18 @@ async def new_request(callback: CallbackQuery):
     await callback.message.edit_text("🚀 Начинаем новую заявку!")
     await start(callback.message)
 
-# === Запуск ===
-async def main():
-    await dp.start_polling(bot)
+# === Запуск с авто-перезапуском ===
+async def run_bot():
+    while True:
+        try:
+            logging.info("🚀 Бот запущен и готов к работе...")
+            await dp.start_polling(bot)
+        except TelegramNetworkError as e:
+            logging.error(f"⚠️ Ошибка сети: {e}. Перезапуск через 5 секунд...")
+            await asyncio.sleep(5)
+        except Exception as e:
+            logging.error(f"💥 Неожиданная ошибка: {e}. Перезапуск через 10 секунд...")
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_bot())
