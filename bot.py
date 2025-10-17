@@ -12,7 +12,6 @@ TARGET_CHAT_ID = -1003025877026
 MENTION_USER_IDS = [7492286439, 7604321833]
 TOTAL_FLATS = 264
 TOTAL_FLOORS = 24
-FLATS_PER_PAGE = 20
 
 # === Логи ===
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +32,6 @@ async def start(message: Message):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-
     await message.answer(
         f"🗓 Дата: {today_str}\n\nНажми кнопку, чтобы начать работу с ботом:",
         reply_markup=keyboard
@@ -56,10 +54,7 @@ async def select_podyezd(message: Message):
 async def podyezd_selected(callback: CallbackQuery):
     uid = callback.from_user.id
     _, podyezd = callback.data.split(":")
-
-    if uid not in user_data:
-        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
-
+    user_data.setdefault(uid, {"date": datetime.today().strftime("%d.%m.%Y")})
     user_data[uid]["podyezd"] = podyezd
 
     if podyezd in ["1", "2"]:
@@ -72,9 +67,6 @@ async def podyezd_selected(callback: CallbackQuery):
 # === Этаж ===
 async def select_floor(message: Message):
     uid = message.from_user.id
-    if uid not in user_data:
-        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
-
     builder = InlineKeyboardBuilder()
     for i in range(1, TOTAL_FLOORS + 1):
         builder.button(text=str(i), callback_data=f"floor:{i}")
@@ -85,64 +77,44 @@ async def select_floor(message: Message):
 async def floor_selected(callback: CallbackQuery):
     uid = callback.from_user.id
     _, floor = callback.data.split(":")
-    if uid not in user_data:
-        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
+    user_data.setdefault(uid, {"date": datetime.today().strftime("%d.%m.%Y")})
     user_data[uid]["floor"] = floor
-    await callback.message.answer(f"✅ Этаж: {floor}\nТеперь выбери квартиру.")
-    await select_flat(callback.message, page=1)
+    await callback.message.answer(f"✅ Этаж: {floor}\n✏️ Укажи номер квартиры (от 1 до 264):")
 
-# === Квартиры с учетом подъезда ===
-async def select_flat(message: Message, page: int):
-    uid = message.from_user.id
-    if uid not in user_data:
-        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
-
-    podyezd = user_data[uid].get("podyezd")
-    if not podyezd or podyezd == "Дворовая территория":
-        return  # не показываем клавиатуру для дворовой территории
-
-    # Диапазон квартир по подъезду
-    start_flat, end_flat = (1, 132) if podyezd == "1" else (133, 264)
-
-    builder = InlineKeyboardBuilder()
-    start = start_flat + (page - 1) * FLATS_PER_PAGE
-    end = min(start + FLATS_PER_PAGE - 1, end_flat)
-
-    for i in range(start, end + 1):
-        builder.button(text=str(i), callback_data=f"flat:{i}")
-
-    if page > 1:
-        builder.button(text="⬅️ Назад", callback_data=f"flat_page:{page-1}")
-    if end < end_flat:
-        builder.button(text="Вперёд ➡️", callback_data=f"flat_page:{page+1}")
-
-    builder.adjust(5)
-    await message.answer(f"🏠 Выбери квартиру ({start}-{end} из {end_flat}):", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("flat_page:"))
-async def flats_page(callback: CallbackQuery):
-    uid = callback.from_user.id
-    _, page = callback.data.split(":")
-    await callback.message.delete()
-    await select_flat(callback.message, int(page))
-
-@dp.callback_query(F.data.startswith("flat:"))
-async def flat_selected(callback: CallbackQuery):
-    uid = callback.from_user.id
-    _, flat = callback.data.split(":")
-    user_data[uid]["flat"] = flat
-    await callback.message.answer(f"✅ Квартира: {flat}\n\n✏️ Какие работы необходимо провести? (напиши сообщением)")
-
-# === Комментарий и отправка ===
+# === Ввод номера квартиры ===
 @dp.message(F.text)
-async def comment_handler(message: Message):
+async def apartment_handler(message: Message):
     uid = message.from_user.id
     if uid not in user_data:
         return
-    data = user_data[uid]
-    if "flat" not in data and data.get("podyezd") in ["1", "2"]:
-        return  # квартира обязателен для подъездов 1 и 2
 
+    podyezd = user_data[uid].get("podyezd")
+    # Если дворовая территория → сразу комментарий
+    if podyezd == "Дворовая территория":
+        await comment_handler(message)
+        return
+
+    # Проверка, что пользователь вводит только число
+    if not message.text.isdigit():
+        await message.reply("❌ Вводить можно только цифры от 1 до 264. Попробуй снова.")
+        return
+
+    flat = int(message.text)
+    # Проверка диапазона по подъезду
+    if podyezd == "1" and not (1 <= flat <= 132):
+        await message.reply("❌ Для подъезда 1 доступны квартиры с 1 по 132. Попробуй снова.")
+        return
+    if podyezd == "2" and not (133 <= flat <= 264):
+        await message.reply("❌ Для подъезда 2 доступны квартиры с 133 по 264. Попробуй снова.")
+        return
+
+    user_data[uid]["flat"] = flat
+    await message.reply("✅ Квартира сохранена.\n✏️ Какие работы необходимо провести? (напиши сообщением)")
+
+# === Комментарий и отправка ===
+async def comment_handler(message: Message):
+    uid = message.from_user.id
+    data = user_data[uid]
     data["comment"] = message.text
     formatted_date = data["date"]
 
@@ -154,14 +126,15 @@ async def comment_handler(message: Message):
         f"📩 <b>Новая заявка!</b>\n\n"
         f"🗓 Дата: {formatted_date}\n"
         f"🚪 Подъезд: {data.get('podyezd', '-')}\n"
-        + (f"🏢 Этаж: {data.get('floor', '-')}\n" if "floor" in data else "")
-        + (f"🏠 Квартира: {data.get('flat', '-')}\n" if "flat" in data else "")
+        + (f"🏢 Этаж: {data.get('floor', '-')}\n" if 'floor' in data else "")
+        + (f"🏠 Квартира: {data.get('flat', '-')}\n" if 'flat' in data else "")
         + f"💬 Комментарий: {data['comment']}\n\n"
         f"👤 Получатели: {mentions}"
     )
 
     await bot.send_message(chat_id=TARGET_CHAT_ID, text=text, parse_mode="HTML")
 
+    # Кнопка "новая заявка"
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Подать новую заявку", callback_data="new_request")
     await message.answer("✅ Заявка отправлена в группу!", reply_markup=builder.as_markup())
@@ -177,6 +150,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
