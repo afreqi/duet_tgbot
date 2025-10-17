@@ -10,7 +10,6 @@ from datetime import datetime
 BOT_TOKEN = "8342746290:AAHZ-hr_0kjfF5RllgXdBML8B8x4FkvtZdQ"
 TARGET_CHAT_ID = -1003025877026
 MENTION_USER_IDS = [7492286439, 7604321833]
-TOTAL_FLATS = 264
 TOTAL_FLOORS = 24
 
 # === Логи ===
@@ -62,7 +61,8 @@ async def podyezd_selected(callback: CallbackQuery):
         await select_floor(callback.message)
     else:
         # Дворовая территория → пропуск этажей и квартир
-        await callback.message.answer(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести? (напиши сообщением)")
+        user_data[uid]["expect_comment"] = True
+        await callback.message.answer(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести? (можно писать любые символы)")
 
 # === Этаж ===
 async def select_floor(message: Message):
@@ -79,48 +79,47 @@ async def floor_selected(callback: CallbackQuery):
     _, floor = callback.data.split(":")
     user_data.setdefault(uid, {"date": datetime.today().strftime("%d.%m.%Y")})
     user_data[uid]["floor"] = floor
-    await callback.message.answer(f"✅ Этаж: {floor}\n✏️ Укажи номер квартиры (от 1 до 264):")
 
-# === Ввод номера квартиры ===
-@dp.message(F.text)
-async def apartment_handler(message: Message):
+    # Подъезд 1 или 2 → запрос номера квартиры
+    user_data[uid]["expect_flat"] = True
+    await callback.message.answer("✏️ Укажи номер квартиры (цифры только, диапазон зависит от подъезда)")
+
+# === Ввод квартиры и комментария ===
+@dp.message()
+async def handle_flat_or_comment(message: Message):
     uid = message.from_user.id
     if uid not in user_data:
         return
 
-    podyezd = user_data[uid].get("podyezd")
-    # Если дворовая территория → сразу комментарий
-    if podyezd == "Дворовая территория":
-        await comment_handler(message)
-        return
-
-    # Проверка, что пользователь вводит только число
-    if not message.text.isdigit():
-        await message.reply("❌ Вводить можно только цифры от 1 до 264. Попробуй снова.")
-        return
-
-    flat = int(message.text)
-    # Проверка диапазона по подъезду
-    if podyezd == "1" and not (1 <= flat <= 132):
-        await message.reply("❌ Для подъезда 1 доступны квартиры с 1 по 132. Попробуй снова.")
-        return
-    if podyezd == "2" and not (133 <= flat <= 264):
-        await message.reply("❌ Для подъезда 2 доступны квартиры с 133 по 264. Попробуй снова.")
-        return
-
-    user_data[uid]["flat"] = flat
-    await message.reply("✅ Квартира сохранена.\n✏️ Какие работы необходимо провести? (напиши сообщением)")
-
-# === Комментарий и отправка ===
-async def comment_handler(message: Message):
-    uid = message.from_user.id
     data = user_data[uid]
-    data["comment"] = message.text
-    formatted_date = data["date"]
 
-    mentions = " ".join(
-        [f'<a href="tg://user?id={uid}">Получатель</a>' for uid in MENTION_USER_IDS]
-    )
+    # --- Ввод квартиры ---
+    if data.get("expect_flat"):
+        if not message.text.isdigit():
+            await message.reply("❌ Вводить можно только цифры от 1 до 264. Попробуй снова.")
+            return
+        flat = int(message.text)
+        podyezd = data["podyezd"]
+        if (podyezd == "1" and not (1 <= flat <= 132)) or (podyezd == "2" and not (133 <= flat <= 264)):
+            await message.reply(f"❌ Неверный номер квартиры для подъезда {podyezd}. Попробуй снова.")
+            return
+        data["flat"] = flat
+        data["expect_flat"] = False
+        data["expect_comment"] = True
+        await message.reply("✅ Квартира сохранена.\n✏️ Какие работы необходимо провести? (можно писать любые символы)")
+        return
+
+    # --- Ввод комментария ---
+    if data.get("expect_comment"):
+        data["comment"] = message.text
+        data["expect_comment"] = False
+        await send_request_to_group(uid, message)
+
+# === Отправка заявки в группу ===
+async def send_request_to_group(uid: int, message: Message):
+    data = user_data[uid]
+    formatted_date = data["date"]
+    mentions = " ".join([f'<a href="tg://user?id={uid}">Получатель</a>' for uid in MENTION_USER_IDS])
 
     text = (
         f"📩 <b>Новая заявка!</b>\n\n"
@@ -128,7 +127,7 @@ async def comment_handler(message: Message):
         f"🚪 Подъезд: {data.get('podyezd', '-')}\n"
         + (f"🏢 Этаж: {data.get('floor', '-')}\n" if 'floor' in data else "")
         + (f"🏠 Квартира: {data.get('flat', '-')}\n" if 'flat' in data else "")
-        + f"💬 Комментарий: {data['comment']}\n\n"
+        + f"💬 Комментарий: {data.get('comment', '-')}\n\n"
         f"👤 Получатели: {mentions}"
     )
 
