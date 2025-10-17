@@ -62,7 +62,7 @@ async def podyezd_selected(callback: CallbackQuery):
     else:
         # Дворовая территория → пропуск этажей и квартир
         user_data[uid]["expect_comment"] = True
-        await callback.message.answer(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести? (можно писать любые символы)")
+        await callback.message.answer(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести?")
 
 # === Этаж ===
 async def select_floor(message: Message):
@@ -124,10 +124,10 @@ async def send_request_to_group(uid: int, message: Message):
     text = (
         f"📩 <b>Новая заявка!</b>\n\n"
         f"🗓 Дата: {formatted_date}\n"
-        f"🚪 Подъезд: {data.get('podyezd', '-')}\n"
+        f"🚪 Подъезд (дворовая территория): {data.get('podyezd', '-')}\n"
         + (f"🏢 Этаж: {data.get('floor', '-')}\n" if 'floor' in data else "")
         + (f"🏠 Квартира: {data.get('flat', '-')}\n" if 'flat' in data else "")
-        + f"💬 Комментарий: {data.get('comment', '-')}\n\n"
+        + f"💬 Какие работы нужно провести: {data.get('comment', '-')}\n\n"
         f"👤 Получатели: {mentions}"
     )
 
