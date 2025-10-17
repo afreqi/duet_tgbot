@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime
@@ -28,9 +28,21 @@ async def start(message: Message):
     today_str = datetime.today().strftime("%d.%m.%Y")
     user_data[uid] = {"date": today_str}
 
-    await message.answer(
-        f"🗓 Дата: {today_str}\n\n🚪 Выбери подъезд:"
+    # 🔹 Новое: Кнопка для запуска бота без /start
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🚀 Запустить бота")]],
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
+
+    await message.answer(
+        f"🗓 Дата: {today_str}\n\nНажми кнопку, чтобы начать работу с ботом:",
+        reply_markup=keyboard
+    )
+
+# 🔹 Новое: обработка кнопки запуска
+@dp.message(F.text == "🚀 Запустить бота")
+async def launch_bot(message: Message):
     await select_podyezd(message)
 
 # === Подъезд ===
@@ -47,17 +59,17 @@ async def podyezd_selected(callback: CallbackQuery):
     _, podyezd = callback.data.split(":")
 
     if uid not in user_data:
-        today_str = datetime.today().strftime("%d.%m.%Y")
-        user_data[uid] = {"date": today_str}
+        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
 
     user_data[uid]["podyezd"] = podyezd
 
     if podyezd in ["1", "2"]:
+        # Для 1 и 2 подъезда сначала этаж, затем квартиры
         await callback.message.edit_text(f"✅ Подъезд: {podyezd}\nТеперь выбери этаж:")
         await select_floor(callback.message)
     else:
-        await callback.message.edit_text(f"✅ Подъезд: {podyezd}\nТеперь выбери квартиру.")
-        await select_flat(callback.message, page=1)
+        # Дворовая территория → пропуск этажей и квартир, сразу комментарий
+        await callback.message.edit_text(f"✅ Подъезд: {podyezd}\n✏️ Какие работы необходимо провести? (напиши сообщением)")
 
 # === Этаж ===
 async def select_floor(message: Message):
@@ -91,12 +103,13 @@ async def select_flat(message: Message, page: int):
     builder = InlineKeyboardBuilder()
     podyezd = user_data[uid].get("podyezd")
 
+    # Диапазон квартир строго по подъезду
     if podyezd == "1":
         start_flat, end_flat = 1, 132
     elif podyezd == "2":
         start_flat, end_flat = 133, 264
     else:
-        start_flat, end_flat = 1, 264
+        return  # Дворовая территория → пропуск выбора квартиры
 
     start = start_flat + (page - 1) * FLATS_PER_PAGE
     end = min(start + FLATS_PER_PAGE - 1, end_flat)
@@ -141,7 +154,7 @@ async def flat_selected(callback: CallbackQuery):
 @dp.message(F.text)
 async def comment_handler(message: Message):
     uid = message.from_user.id
-    if uid not in user_data or "flat" not in user_data[uid]:
+    if uid not in user_data or ("flat" not in user_data[uid] and user_data[uid]["podyezd"] in ["1", "2"]):
         return
 
     user_data[uid]["comment"] = message.text
@@ -157,8 +170,8 @@ async def comment_handler(message: Message):
         f"🗓 Дата: {formatted_date}\n"
         f"🚪 Подъезд: {data.get('podyezd', '-')}\n"
         + (f"🏢 Этаж: {data.get('floor', '-')}\n" if 'floor' in data else '')
-        + f"🏠 Квартира: {data['flat']}\n"
-        f"💬 Комментарий: {data['comment']}\n\n"
+        + (f"🏠 Квартира: {data.get('flat', '-')}\n" if 'flat' in data else '')
+        + f"💬 Комментарий: {data['comment']}\n\n"
         f"👤 Получатели: {mentions}"
     )
 
@@ -179,5 +192,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
