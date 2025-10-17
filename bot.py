@@ -61,6 +61,10 @@ async def podyezd_selected(callback: CallbackQuery):
 
 # === Этаж ===
 async def select_floor(message: Message):
+    uid = message.from_user.id
+    if uid not in user_data:
+        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
+
     builder = InlineKeyboardBuilder()
     for i in range(1, TOTAL_FLOORS + 1):
         builder.button(text=str(i), callback_data=f"floor:{i}")
@@ -69,8 +73,11 @@ async def select_floor(message: Message):
 
 @dp.callback_query(F.data.startswith("floor:"))
 async def floor_selected(callback: CallbackQuery):
-    _, floor = callback.data.split(":")
     uid = callback.from_user.id
+    if uid not in user_data:
+        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
+
+    _, floor = callback.data.split(":")
     user_data[uid]["floor"] = floor
     await callback.message.edit_text(f"✅ Этаж: {floor}\nТеперь выбери квартиру.")
     await select_flat(callback.message, page=1)
@@ -78,14 +85,17 @@ async def floor_selected(callback: CallbackQuery):
 # === Квартиры с учетом подъезда ===
 async def select_flat(message: Message, page: int):
     uid = message.from_user.id
-    builder = InlineKeyboardBuilder()
+    if uid not in user_data:
+        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
 
+    builder = InlineKeyboardBuilder()
     podyezd = user_data[uid].get("podyezd")
+
     if podyezd == "1":
         start_flat, end_flat = 1, 132
     elif podyezd == "2":
         start_flat, end_flat = 133, 264
-    else:  # Дворовая территория
+    else:
         start_flat, end_flat = 1, 264
 
     start = start_flat + (page - 1) * FLATS_PER_PAGE
@@ -107,14 +117,21 @@ async def select_flat(message: Message, page: int):
 
 @dp.callback_query(F.data.startswith("flat_page:"))
 async def flats_page(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if uid not in user_data:
+        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
+
     _, page = callback.data.split(":")
     await callback.message.delete()
     await select_flat(callback.message, int(page))
 
 @dp.callback_query(F.data.startswith("flat:"))
 async def flat_selected(callback: CallbackQuery):
-    _, flat = callback.data.split(":")
     uid = callback.from_user.id
+    if uid not in user_data:
+        user_data[uid] = {"date": datetime.today().strftime("%d.%m.%Y")}
+
+    _, flat = callback.data.split(":")
     user_data[uid]["flat"] = flat
     await callback.message.edit_text(
         f"✅ Квартира: {flat}\n\n✏️ Какие работы необходимо провести? (напиши сообщением)"
@@ -162,4 +179,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
